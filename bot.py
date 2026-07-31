@@ -9,36 +9,66 @@ CHAT_ID = os.environ["CHAT_ID"]
 
 bot = Bot(token=TOKEN)
 
-EMA_PERIOD = 50
 last_signal = None
 
 
-def get_xauusd_data():
-    # Temporary test feed (we will connect a better XAUUSD feed next)
+def get_candles():
+    # Placeholder connection - we will connect the final XAUUSD feed next
     url = "https://api.metals.live/v1/spot/gold"
+
     r = requests.get(url, timeout=10)
     data = r.json()
 
     price = float(data[0]["price"])
+
     return price
 
 
-def send_alert(message):
+def calculate_ema(prices):
+    series = pd.Series(prices)
+    return series.ewm(span=50).mean().iloc[-1]
+
+
+def send_alert(text):
     bot.send_message(
         chat_id=CHAT_ID,
-        text=message
+        text=text
     )
 
 
 def main():
     global last_signal
 
+    prices = []
+
     while True:
         try:
-            price = get_xauusd_data()
+            price = get_candles()
+            prices.append(price)
 
-            # EMA logic will be added after connecting candle data
-            print("XAUUSD price:", price)
+            if len(prices) >= 50:
+
+                ema50 = calculate_ema(prices)
+
+                if price > ema50 and last_signal != "BUY":
+                    send_alert(
+                        f"🟢 XAUUSD\n\n"
+                        f"CLOSED ABOVE EMA 50\n"
+                        f"Price: {price}\n"
+                        f"EMA50: {ema50}"
+                    )
+                    last_signal = "BUY"
+
+
+                elif price < ema50 and last_signal != "SELL":
+                    send_alert(
+                        f"🔴 XAUUSD\n\n"
+                        f"CLOSED BELOW EMA 50\n"
+                        f"Price: {price}\n"
+                        f"EMA50: {ema50}"
+                    )
+                    last_signal = "SELL"
+
 
             time.sleep(60)
 
