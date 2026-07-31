@@ -1,80 +1,70 @@
-import os
 import time
 import requests
-import pandas as pd
-from telegram import Bot
 
-TOKEN = os.environ["TELEGRAM_TOKEN"]
-CHAT_ID = os.environ["CHAT_ID"]
+from config import (
+    TELEGRAM_TOKEN,
+    TELEGRAM_CHAT_ID,
+    CHECK_INTERVAL
+)
 
-bot = Bot(token=TOKEN)
-
-last_signal = None
-
-
-def get_candles():
-    # Placeholder connection - we will connect the final XAUUSD feed next
-    url = "https://api.metals.live/v1/spot/gold"
-
-    r = requests.get(url, timeout=10)
-    data = r.json()
-
-    price = float(data[0]["price"])
-
-    return price
+from data import get_candles
+from strategy import check_signal
 
 
-def calculate_ema(prices):
-    series = pd.Series(prices)
-    return series.ewm(span=50).mean().iloc[-1]
+last_alert = None
 
 
-def send_alert(text):
-    bot.send_message(
-        chat_id=CHAT_ID,
-        text=text
-    )
+def send_telegram(message):
+    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+
+    payload = {
+        "chat_id": TELEGRAM_CHAT_ID,
+        "text": message
+    }
+
+    requests.post(url, json=payload, timeout=10)
 
 
 def main():
-    global last_signal
 
-    prices = []
+    global last_alert
+
+    print("XAUUSD EMA50 Telegram Bot Started")
 
     while True:
+
         try:
-            price = get_candles()
-            prices.append(price)
+            candles = get_candles()
 
-            if len(prices) >= 50:
+            signal = check_signal(candles)
 
-                ema50 = calculate_ema(prices)
+            if signal:
 
-                if price > ema50 and last_signal != "BUY":
-                    send_alert(
-                        f"🟢 XAUUSD\n\n"
-                        f"CLOSED ABOVE EMA 50\n"
-                        f"Price: {price}\n"
-                        f"EMA50: {ema50}"
+                alert_key = (
+                    signal["signal"],
+                    signal["time"]
+                )
+
+                # Prevent duplicate alerts
+                if alert_key != last_alert:
+
+                    message = (
+                        f"XAUUSD M1 {signal['signal']}\n\n"
+                        f"Price: {signal['price']}\n"
+                        f"EMA50: {signal['ema']}\n"
+                        f"Candle: {signal['time']}"
                     )
-                    last_signal = "BUY"
 
+                    send_telegram(message)
 
-                elif price < ema50 and last_signal != "SELL":
-                    send_alert(
-                        f"🔴 XAUUSD\n\n"
-                        f"CLOSED BELOW EMA 50\n"
-                        f"Price: {price}\n"
-                        f"EMA50: {ema50}"
-                    )
-                    last_signal = "SELL"
+                    last_alert = alert_key
 
-
-            time.sleep(60)
+                    print(message)
 
         except Exception as e:
-            print(e)
-            time.sleep(60)
+            print("Error:", e)
+
+        time.sleep(CHECK_INTERVAL)
 
 
 if __name__ == "__main__":
